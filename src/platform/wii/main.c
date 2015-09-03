@@ -8,6 +8,8 @@
 #include <fat.h>
 #include <gccore.h>
 #include <malloc.h>
+#include <strings.h>
+#include <unistd.h>
 #include <wiiuse/wpad.h>
 
 #include "util/common.h"
@@ -19,6 +21,9 @@
 #include "util/gui/font.h"
 #include "util/vfs.h"
 
+#include "wii-settings.h"
+#include "wii-mem2.h"
+
 #define SAMPLES 1024
 
 static void GBAWiiLog(struct GBAThread* thread, enum GBALogLevel level, const char* format, va_list args);
@@ -27,19 +32,56 @@ static bool GBAWiiLoadGame(const char* path);
 
 static void _postVideoFrame(struct GBAAVStream*, struct GBAVideoRenderer* renderer);
 static void _audioDMA(void);
+static void _setRumble(struct GBARumble* rumble, int enable);
+static void _sampleRotation(struct GBARotationSource* source);
+static int32_t _readTiltX(struct GBARotationSource* source);
+static int32_t _readTiltY(struct GBARotationSource* source);
+static int32_t _readGyroZ(struct GBARotationSource* source);
 
 static void _drawStart(void);
 static void _drawEnd(void);
 static int _pollInput(void);
+static uint16_t _pollGameInput(void);
 
 static struct GBAContext context;
 static struct GBAVideoSoftwareRenderer renderer;
 static struct GBAAVStream stream;
+static struct GBARumble rumble;
+static struct GBARotationSource rotation;
 static FILE* logfile;
 static GXRModeObj* mode;
 static Mtx model, view, modelview;
 static uint16_t* texmem;
 static GXTexObj tex;
+static int32_t tiltX;
+static int32_t tiltY;
+static int32_t gyroZ;
+
+struct _btn_map {
+	u32 btnId;				// button 'id'
+	char btnName[5];	// button name
+};
+
+struct _btn_map BtnMap[] =	{
+	{WPAD_CLASSIC_BUTTON_A, "A"},
+	{WPAD_CLASSIC_BUTTON_B, "B"},
+	{WPAD_CLASSIC_BUTTON_X, "X"},
+	{WPAD_CLASSIC_BUTTON_Y, "Y"},
+	{WPAD_CLASSIC_BUTTON_PLUS, "+"},
+	{WPAD_CLASSIC_BUTTON_MINUS, "-"},
+	{WPAD_CLASSIC_BUTTON_HOME, "H"},
+	{WPAD_CLASSIC_BUTTON_FULL_L, "L"},
+	{WPAD_CLASSIC_BUTTON_FULL_R, "R"},
+	{WPAD_CLASSIC_BUTTON_ZL, "ZL"},
+	{WPAD_CLASSIC_BUTTON_ZR, "ZR"}
+};
+
+struct WiiSettings wiiSettings;
+static bool goExit = false;
+
+static uint16_t _pollGameInputCustom(void);
+static u32 _getWiiButton(char btnName[5]);
+GXRModeObj * _findVideoMode(void);
 
 static void* framebuffer[2];
 static int whichFb = 0;
@@ -57,6 +99,9 @@ int main(int argc, char *argv[]) {
 	AUDIO_Init(0);
 	AUDIO_SetDSPSampleRate(AI_SAMPLERATE_48KHZ);
 	AUDIO_RegisterDMACallback(_audioDMA);
+	InitMem2Manager();
+	
+	_wiiParseArgs(argc, argv);
 
 	memset(audioBuffer, 0, sizeof(audioBuffer));
 
@@ -64,7 +109,7 @@ int main(int argc, char *argv[]) {
 #error This pixel format is unsupported. Please use -DCOLOR_16-BIT -DCOLOR_5_6_5
 #endif
 
-	mode = VIDEO_GetPreferredMode(0);
+	mode = _findVideoMode();
 	framebuffer[0] = SYS_AllocateFramebuffer(mode);
 	framebuffer[1] = SYS_AllocateFramebuffer(mode);
 
@@ -89,7 +134,12 @@ int main(int argc, char *argv[]) {
 	GX_SetScissor(0, 0, mode->viWidth, mode->viWidth);
 	GX_SetDispCopySrc(0, 0, mode->fbWidth, mode->efbHeight);
 	GX_SetDispCopyDst(mode->fbWidth, xfbHeight);
-	GX_SetCopyFilter(mode->aa, mode->sample_pattern, GX_TRUE, mode->vfilter);
+	
+	u8 sharp[7] = {0,0,21,22,21,0,0};
+	u8 soft[7] = {8,8,10,12,10,8,8};
+	u8* vfilter = wiiSettings.render == 3 ? sharp : wiiSettings.render == 4 ? soft : mode->vfilter;
+	GX_SetCopyFilter (mode->aa, mode->sample_pattern, (wiiSettings.render != 2) ? GX_TRUE : GX_FALSE, vfilter);
+	
 	GX_SetFieldMode(mode->field_rendering, ((mode->viHeight == 2 * mode->xfbHeight) ? GX_ENABLE : GX_DISABLE));
 
 	GX_SetCullMode(GX_CULL_NONE);
@@ -106,7 +156,7 @@ int main(int argc, char *argv[]) {
 	GX_SetNumChans(1);
 	GX_SetNumTexGens(1);
 	GX_SetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR0A0);
-	GX_SetTevOp(GX_TEVSTAGE0, GX_REPLACE);
+	GX_SetTevOp(GX_TEVSTAGE0, GX_MODULATE);
 
 	GX_SetTexCoordGen(GX_TEXCOORD0, GX_TG_MTX2x4, GX_TG_TEX0, GX_IDENTITY);
 	GX_InvVtxCache();
@@ -127,6 +177,9 @@ int main(int argc, char *argv[]) {
 	texmem = memalign(32, 256 * 256 * BYTES_PER_PIXEL);
 	memset(texmem, 0, 256 * 256 * BYTES_PER_PIXEL);
 	GX_InitTexObj(&tex, texmem, 256, 256, GX_TF_RGB565, GX_CLAMP, GX_CLAMP, GX_FALSE);
+	
+	if (wiiSettings.render == 2)
+		GX_InitTexObjLOD(&tex,GX_NEAR,GX_NEAR_MIP_NEAR,2.5,9.0,0.0,GX_FALSE,GX_FALSE,GX_ANISO_1);
 
 	font = GUIFontCreate();
 
@@ -138,15 +191,24 @@ int main(int argc, char *argv[]) {
 	stream.postAudioBuffer = 0;
 	stream.postVideoFrame = _postVideoFrame;
 
+	rumble.setRumble = _setRumble;
+
+	rotation.sample = _sampleRotation;
+	rotation.readTiltX = _readTiltX;
+	rotation.readTiltY = _readTiltY;
+	rotation.readGyroZ = _readGyroZ;
+
 	GBAContextInit(&context, 0);
 	struct GBAOptions opts = {
 		.useBios = true,
 		.logLevel = 0,
-		.idleOptimization = IDLE_LOOP_REMOVE
+		.idleOptimization = IDLE_LOOP_DETECT
 	};
 	GBAConfigLoadDefaults(&context.config, &opts);
 	context.gba->logHandler = GBAWiiLog;
 	context.gba->stream = &stream;
+	context.gba->rumble = &rumble;
+	context.gba->rotationSource = &rotation;
 
 	GBAVideoSoftwareRendererCreate(&renderer);
 	renderer.outputBuffer = memalign(32, 256 * 256 * BYTES_PER_PIXEL);
@@ -156,19 +218,17 @@ int main(int argc, char *argv[]) {
 	GBAAudioResizeBuffer(&context.gba->audio, SAMPLES);
 
 #if RESAMPLE_LIBRARY == RESAMPLE_BLIP_BUF
-	blip_set_rates(context.gba->audio.left,  GBA_ARM7TDMI_FREQUENCY, 48000);
-	blip_set_rates(context.gba->audio.right, GBA_ARM7TDMI_FREQUENCY, 48000);
+	double ratio = GBAAudioCalculateRatio(1, 60, 1);
+	blip_set_rates(context.gba->audio.left,  GBA_ARM7TDMI_FREQUENCY, 48000 * ratio);
+	blip_set_rates(context.gba->audio.right, GBA_ARM7TDMI_FREQUENCY, 48000 * ratio);
 #endif
 
 	char path[256];
 	guOrtho(proj, -20, 220, 0, 400, 0, 300);
 	GX_LoadProjectionMtx(proj, GX_ORTHOGRAPHIC);
 
-	if(argc > 1 && argv[1] != NULL && argv[2] != NULL) {
-		snprintf(path, 256, "/%s/%s", argv[1], argv[2]);
-		_drawStart();
-		_drawEnd();
-		if (!GBAWiiLoadGame(path)){
+	if (wiiSettings.fullRomPath != NULL){
+		if (!GBAWiiLoadGame(wiiSettings.fullRomPath)){
 			free(renderer.outputBuffer);
 			GUIFontDestroy(font);
 			return 1;
@@ -185,11 +245,28 @@ int main(int argc, char *argv[]) {
 			return 1;
 		}
 	}
+	
+	WPAD_SetDataFormat(0, WPAD_FMT_BTNS_ACC);
 	GBAContextStart(&context);
+		if (context.gba->memory.hw.devices & HW_GYRO) {
+			int i;
+			for (i = 0; i < 6; ++i) {
+				u32 result = WPAD_SetMotionPlus(0, 1);
+				if (result == WPAD_ERR_NONE) {
+					free(renderer.outputBuffer);
+					GUIFontDestroy(font);
+					return 1;
+				}
+				sleep(1);
+			}
+		}
 
-	guOrtho(proj, -10, VIDEO_VERTICAL_PIXELS + 10, 0, VIDEO_HORIZONTAL_PIXELS, 0, 300);
+	int overscan = (CONF_GetAspectRatio() == CONF_ASPECT_16_9) ? 10 : 20;
+	guOrtho(proj, -(overscan), VIDEO_VERTICAL_PIXELS + overscan, 0, VIDEO_HORIZONTAL_PIXELS, 0, 300);
 	GX_LoadProjectionMtx(proj, GX_ORTHOGRAPHIC);
 
+	uint16_t keys = 0;
+	
 	while (true) {
 #if RESAMPLE_LIBRARY == RESAMPLE_BLIP_BUF
 		int available = blip_samples_avail(context.gba->audio.left);
@@ -207,72 +284,9 @@ int main(int argc, char *argv[]) {
 			AUDIO_StartDMA();
 		}
 #endif
-		PAD_ScanPads();
-		u16 padkeys = PAD_ButtonsHeld(0);
-		WPAD_ScanPads();
-		u32 wiiPad = WPAD_ButtonsHeld(0);
-		u32 ext = 0;
-		uint16_t keys = 0;
-		WPAD_Probe(0, &ext);
-
-		if ((padkeys & PAD_BUTTON_A) || (wiiPad & WPAD_BUTTON_2) || 
-		    ((ext == WPAD_EXP_CLASSIC) && (wiiPad & (WPAD_CLASSIC_BUTTON_A | WPAD_CLASSIC_BUTTON_Y)))) {
-			keys |= 1 << GBA_KEY_A;
-		}
-		if ((padkeys & PAD_BUTTON_B) || (wiiPad & WPAD_BUTTON_1) ||
-		    ((ext == WPAD_EXP_CLASSIC) && (wiiPad & (WPAD_CLASSIC_BUTTON_B | WPAD_CLASSIC_BUTTON_X)))) {
-			keys |= 1 << GBA_KEY_B;
-		}
-		if ((padkeys & PAD_TRIGGER_L) || (wiiPad & WPAD_BUTTON_B) ||
-		    ((ext == WPAD_EXP_CLASSIC) && (wiiPad & WPAD_CLASSIC_BUTTON_FULL_L))) {
-			keys |= 1 << GBA_KEY_L;
-		}
-		if ((padkeys & PAD_TRIGGER_R) || (wiiPad & WPAD_BUTTON_A) ||
-		    ((ext == WPAD_EXP_CLASSIC) && (wiiPad & WPAD_CLASSIC_BUTTON_FULL_R))) {
-			keys |= 1 << GBA_KEY_R;
-		}
-		if ((padkeys & PAD_BUTTON_START) || (wiiPad & WPAD_BUTTON_PLUS) ||
-		    ((ext == WPAD_EXP_CLASSIC) && (wiiPad & WPAD_CLASSIC_BUTTON_PLUS))) {
-			keys |= 1 << GBA_KEY_START;
-		}
-		if ((padkeys & (PAD_BUTTON_X | PAD_BUTTON_Y)) || (wiiPad & WPAD_BUTTON_MINUS) ||
-		    ((ext == WPAD_EXP_CLASSIC) && (wiiPad & WPAD_CLASSIC_BUTTON_MINUS))) {
-			keys |= 1 << GBA_KEY_SELECT;
-		}
-		if ((padkeys & PAD_BUTTON_LEFT) || (wiiPad & WPAD_BUTTON_UP) ||
-		    ((ext == WPAD_EXP_CLASSIC) && (wiiPad & WPAD_CLASSIC_BUTTON_LEFT))) {
-			keys |= 1 << GBA_KEY_LEFT;
-		}
-		if ((padkeys & PAD_BUTTON_RIGHT) || (wiiPad & WPAD_BUTTON_DOWN) ||
-		    ((ext == WPAD_EXP_CLASSIC) && (wiiPad & WPAD_CLASSIC_BUTTON_RIGHT))) {
-			keys |= 1 << GBA_KEY_RIGHT;
-		}
-		if ((padkeys & PAD_BUTTON_UP) || (wiiPad & WPAD_BUTTON_RIGHT) ||
-		    ((ext == WPAD_EXP_CLASSIC) && (wiiPad & WPAD_CLASSIC_BUTTON_UP))) {
-			keys |= 1 << GBA_KEY_UP;
-		}
-		if ((padkeys & PAD_BUTTON_DOWN) || (wiiPad & WPAD_BUTTON_LEFT) ||
-		    ((ext == WPAD_EXP_CLASSIC) && (wiiPad & WPAD_CLASSIC_BUTTON_DOWN))) {
-			keys |= 1 << GBA_KEY_DOWN;
-		}
-		int x = PAD_StickX(0);
-		int y = PAD_StickY(0);
-		if (x < -0x40) {
-			keys |= 1 << GBA_KEY_LEFT;
-		}
-		if (x > 0x40) {
-			keys |= 1 << GBA_KEY_RIGHT;
-		}
-		if (y < -0x40) {
-			keys |= 1 << GBA_KEY_DOWN;
-		}
-		if (y > 0x40) {
-			keys |= 1 << GBA_KEY_UP;
-		}
-		if ((padkeys & PAD_TRIGGER_Z) || (wiiPad & WPAD_BUTTON_HOME) || (wiiPad & WPAD_CLASSIC_BUTTON_HOME)) {
-			break;
-		}
+		keys = (!wiiSettings.useCustomInput) ? _pollGameInput() : _pollGameInputCustom();
 		GBAContextFrame(&context, keys);
+		if (goExit) break;
 	}
 
 	fclose(logfile);
@@ -329,7 +343,7 @@ static void GBAWiiFrame(void) {
 
 bool GBAWiiLoadGame(const char* path) {
 	_drawStart();
-	GUIFontPrintf(font, 0, 30, GUI_TEXT_CENTER, 0xFFFFFFFF, "Loading...");
+	GUIFontPrintf(font, 176, 120, GUI_TEXT_CENTER, 0xFFFFFFFF, "Loading...");
 	_drawEnd();
 
 	return GBAContextLoadROM(&context, path, true);
@@ -338,6 +352,9 @@ bool GBAWiiLoadGame(const char* path) {
 void GBAWiiLog(struct GBAThread* thread, enum GBALogLevel level, const char* format, va_list args) {
 	UNUSED(thread);
 	UNUSED(level);
+	if (!logfile) {
+		return;
+	}
 	vfprintf(logfile, format, args);
 	fprintf(logfile, "\n");
 	fflush(logfile);
@@ -376,6 +393,75 @@ static void _drawEnd(void) {
 	VIDEO_Flush();
 }
 
+static uint16_t _pollGameInput(void){
+	PAD_ScanPads();
+	u16 padkeys = PAD_ButtonsHeld(0);
+	WPAD_ScanPads();
+	u32 wiiPad = WPAD_ButtonsHeld(0);
+	u32 ext = 0;
+	uint16_t keys = 0;
+	WPAD_Probe(0, &ext);
+
+	if ((padkeys & PAD_BUTTON_A) || (wiiPad & WPAD_BUTTON_2) || 
+			((ext == WPAD_EXP_CLASSIC) && (wiiPad & (WPAD_CLASSIC_BUTTON_A | WPAD_CLASSIC_BUTTON_Y)))) {
+		keys |= 1 << GBA_KEY_A;
+	}
+	if ((padkeys & PAD_BUTTON_B) || (wiiPad & WPAD_BUTTON_1) ||
+			((ext == WPAD_EXP_CLASSIC) && (wiiPad & (WPAD_CLASSIC_BUTTON_B | WPAD_CLASSIC_BUTTON_X)))) {
+		keys |= 1 << GBA_KEY_B;
+	}
+	if ((padkeys & PAD_TRIGGER_L) || (wiiPad & WPAD_BUTTON_B) ||
+			((ext == WPAD_EXP_CLASSIC) && (wiiPad & WPAD_CLASSIC_BUTTON_FULL_L))) {
+		keys |= 1 << GBA_KEY_L;
+	}
+	if ((padkeys & PAD_TRIGGER_R) || (wiiPad & WPAD_BUTTON_A) ||
+			((ext == WPAD_EXP_CLASSIC) && (wiiPad & WPAD_CLASSIC_BUTTON_FULL_R))) {
+		keys |= 1 << GBA_KEY_R;
+	}
+	if ((padkeys & PAD_BUTTON_START) || (wiiPad & WPAD_BUTTON_PLUS) ||
+			((ext == WPAD_EXP_CLASSIC) && (wiiPad & WPAD_CLASSIC_BUTTON_PLUS))) {
+		keys |= 1 << GBA_KEY_START;
+	}
+	if ((padkeys & (PAD_BUTTON_X | PAD_BUTTON_Y)) || (wiiPad & WPAD_BUTTON_MINUS) ||
+			((ext == WPAD_EXP_CLASSIC) && (wiiPad & WPAD_CLASSIC_BUTTON_MINUS))) {
+		keys |= 1 << GBA_KEY_SELECT;
+	}
+	if ((padkeys & PAD_BUTTON_LEFT) || (wiiPad & WPAD_BUTTON_UP) ||
+			((ext == WPAD_EXP_CLASSIC) && (wiiPad & WPAD_CLASSIC_BUTTON_LEFT))) {
+		keys |= 1 << GBA_KEY_LEFT;
+	}
+	if ((padkeys & PAD_BUTTON_RIGHT) || (wiiPad & WPAD_BUTTON_DOWN) ||
+			((ext == WPAD_EXP_CLASSIC) && (wiiPad & WPAD_CLASSIC_BUTTON_RIGHT))) {
+		keys |= 1 << GBA_KEY_RIGHT;
+	}
+	if ((padkeys & PAD_BUTTON_UP) || (wiiPad & WPAD_BUTTON_RIGHT) ||
+			((ext == WPAD_EXP_CLASSIC) && (wiiPad & WPAD_CLASSIC_BUTTON_UP))) {
+		keys |= 1 << GBA_KEY_UP;
+	}
+	if ((padkeys & PAD_BUTTON_DOWN) || (wiiPad & WPAD_BUTTON_LEFT) ||
+			((ext == WPAD_EXP_CLASSIC) && (wiiPad & WPAD_CLASSIC_BUTTON_DOWN))) {
+		keys |= 1 << GBA_KEY_DOWN;
+	}
+	int x = PAD_StickX(0);
+	int y = PAD_StickY(0);
+	if (x < -0x40) {
+		keys |= 1 << GBA_KEY_LEFT;
+	}
+	if (x > 0x40) {
+		keys |= 1 << GBA_KEY_RIGHT;
+	}
+	if (y < -0x40) {
+		keys |= 1 << GBA_KEY_DOWN;
+	}
+	if (y > 0x40) {
+		keys |= 1 << GBA_KEY_UP;
+	}
+	if ((padkeys & PAD_TRIGGER_Z) || (wiiPad & WPAD_BUTTON_HOME) || (wiiPad & WPAD_CLASSIC_BUTTON_HOME)) {
+		goExit = true;
+	}
+	return keys;
+}
+
 static int _pollInput(void) {
 	PAD_ScanPads();
 	u16 padkeys = PAD_ButtonsHeld(0);
@@ -386,6 +472,20 @@ static int _pollInput(void) {
 	WPAD_Probe(0, &ext);
 
 	int keys = 0;
+	int x = PAD_StickX(0);
+	int y = PAD_StickY(0);
+	if (x < -0x40) {
+		keys |= 1 << GUI_INPUT_LEFT;
+	}
+	if (x > 0x40) {
+		keys |= 1 << GUI_INPUT_RIGHT;
+	}
+	if (y < -0x40) {
+		keys |= 1 << GUI_INPUT_DOWN;
+	}
+	if (y > 0x40) {
+		keys |= 1 << GUI_INPUT_UP;
+	}
 	if ((padkeys & PAD_BUTTON_A) || (wiiPad & WPAD_BUTTON_2) || 
 	    ((ext == WPAD_EXP_CLASSIC) && (wiiPad & (WPAD_CLASSIC_BUTTON_A | WPAD_CLASSIC_BUTTON_Y)))) {
 		keys |= 1 << GUI_INPUT_SELECT;
@@ -393,6 +493,10 @@ static int _pollInput(void) {
 	if ((padkeys & PAD_BUTTON_B) || (wiiPad & WPAD_BUTTON_1) ||
 	    ((ext == WPAD_EXP_CLASSIC) && (wiiPad & (WPAD_CLASSIC_BUTTON_B | WPAD_CLASSIC_BUTTON_X)))) {
 		keys |= 1 << GUI_INPUT_BACK;
+	}
+	if ((padkeys & PAD_TRIGGER_Z) || (wiiPad & WPAD_BUTTON_HOME) ||
+	    ((ext == WPAD_EXP_CLASSIC) && (wiiPad & (WPAD_CLASSIC_BUTTON_HOME)))) {
+		keys |= 1 << GUI_INPUT_CANCEL;
 	}
 	if ((padkeys & PAD_BUTTON_LEFT)|| (wiiPad & WPAD_BUTTON_UP) ||
 	    ((ext == WPAD_EXP_CLASSIC) && (wiiPad & WPAD_CLASSIC_BUTTON_LEFT))) {
@@ -411,4 +515,175 @@ static int _pollInput(void) {
 		keys |= 1 << GUI_INPUT_DOWN;
 	}
 	return keys;
+}
+
+void _setRumble(struct GBARumble* rumble, int enable) {
+	UNUSED(rumble);
+	WPAD_Rumble(0, enable);
+	if (enable) {
+		PAD_ControlMotor(0, PAD_MOTOR_RUMBLE);
+	} else {
+		PAD_ControlMotor(0, PAD_MOTOR_STOP);
+	}
+}
+
+void _sampleRotation(struct GBARotationSource* source) {
+	UNUSED(source);
+	vec3w_t accel;
+	WPAD_Accel(0, &accel);
+	// These are swapped
+	tiltX = (accel.y - 0x1EA) << 22;
+	tiltY = (accel.x - 0x1EA) << 22;
+
+	// This doesn't seem to work at all with -TR remotes
+	struct expansion_t exp;
+	WPAD_Expansion(0, &exp);
+	if (exp.type != EXP_MOTION_PLUS) {
+		return;
+	}
+	gyroZ = exp.mp.rz - 0x1FA0;
+	gyroZ <<= 18;
+}
+
+int32_t _readTiltX(struct GBARotationSource* source) {
+	UNUSED(source);
+	return tiltX;
+}
+
+int32_t _readTiltY(struct GBARotationSource* source) {
+	UNUSED(source);
+	return tiltY;
+}
+
+int32_t _readGyroZ(struct GBARotationSource* source) {
+	UNUSED(source);
+	return gyroZ;
+}
+
+static uint16_t _pollGameInputCustom(void){
+	PAD_ScanPads();
+	u16 padkeys = PAD_ButtonsHeld(0);
+	WPAD_ScanPads();
+	u32 wiiPad = WPAD_ButtonsHeld(0);
+	u32 ext = 0;
+	uint16_t keys = 0;
+	WPAD_Probe(0, &ext);
+
+	if ((padkeys & PAD_BUTTON_A) || (wiiPad & WPAD_BUTTON_2) || 
+			((ext == WPAD_EXP_CLASSIC) && (wiiPad & _getWiiButton(wiiSettings.buttonA)))) {
+		keys |= 1 << GBA_KEY_A;
+	}
+	if ((padkeys & PAD_BUTTON_B) || (wiiPad & WPAD_BUTTON_1) ||
+			((ext == WPAD_EXP_CLASSIC) && (wiiPad & _getWiiButton(wiiSettings.buttonB)))) {
+		keys |= 1 << GBA_KEY_B;
+	}
+	if ((padkeys & PAD_TRIGGER_L) || (wiiPad & WPAD_BUTTON_B) ||
+			((ext == WPAD_EXP_CLASSIC) && (wiiPad & _getWiiButton(wiiSettings.buttonL)))) {
+		keys |= 1 << GBA_KEY_L;
+	}
+	if ((padkeys & PAD_TRIGGER_R) || (wiiPad & WPAD_BUTTON_A) ||
+			((ext == WPAD_EXP_CLASSIC) && (wiiPad & _getWiiButton(wiiSettings.buttonR)))) {
+		keys |= 1 << GBA_KEY_R;
+	}
+	if ((padkeys & PAD_BUTTON_START) || (wiiPad & WPAD_BUTTON_PLUS) ||
+			((ext == WPAD_EXP_CLASSIC) && (wiiPad & WPAD_CLASSIC_BUTTON_PLUS))) {
+		keys |= 1 << GBA_KEY_START;
+	}
+	if ((padkeys & (PAD_BUTTON_X | PAD_BUTTON_Y)) || (wiiPad & WPAD_BUTTON_MINUS) ||
+			((ext == WPAD_EXP_CLASSIC) && (wiiPad & WPAD_CLASSIC_BUTTON_MINUS))) {
+		keys |= 1 << GBA_KEY_SELECT;
+	}
+	if ((padkeys & PAD_BUTTON_LEFT) || (wiiPad & WPAD_BUTTON_UP) ||
+			((ext == WPAD_EXP_CLASSIC) && (wiiPad & WPAD_CLASSIC_BUTTON_LEFT))) {
+		keys |= 1 << GBA_KEY_LEFT;
+	}
+	if ((padkeys & PAD_BUTTON_RIGHT) || (wiiPad & WPAD_BUTTON_DOWN) ||
+			((ext == WPAD_EXP_CLASSIC) && (wiiPad & WPAD_CLASSIC_BUTTON_RIGHT))) {
+		keys |= 1 << GBA_KEY_RIGHT;
+	}
+	if ((padkeys & PAD_BUTTON_UP) || (wiiPad & WPAD_BUTTON_RIGHT) ||
+			((ext == WPAD_EXP_CLASSIC) && (wiiPad & WPAD_CLASSIC_BUTTON_UP))) {
+		keys |= 1 << GBA_KEY_UP;
+	}
+	if ((padkeys & PAD_BUTTON_DOWN) || (wiiPad & WPAD_BUTTON_LEFT) ||
+			((ext == WPAD_EXP_CLASSIC) && (wiiPad & WPAD_CLASSIC_BUTTON_DOWN))) {
+		keys |= 1 << GBA_KEY_DOWN;
+	}
+	int x = PAD_StickX(0);
+	int y = PAD_StickY(0);
+	if (x < -0x40) {
+		keys |= 1 << GBA_KEY_LEFT;
+	}
+	if (x > 0x40) {
+		keys |= 1 << GBA_KEY_RIGHT;
+	}
+	if (y < -0x40) {
+		keys |= 1 << GBA_KEY_DOWN;
+	}
+	if (y > 0x40) {
+		keys |= 1 << GBA_KEY_UP;
+	}
+	if ((padkeys & PAD_TRIGGER_Z) || (wiiPad & WPAD_BUTTON_HOME) || (wiiPad & WPAD_CLASSIC_BUTTON_HOME)) {
+		goExit = true;
+	}
+	return keys;
+}
+
+static u32 _getWiiButton(char btnName[5]){
+	u32 key = 0;
+	int len = sizeof(BtnMap)/sizeof(BtnMap[0]);
+
+	for(int i = 0; i < len; ++i){
+		if(strcasecmp(BtnMap[i].btnName, btnName) == 0) {
+			key = BtnMap[i].btnId;
+			break;
+		}
+	}
+	return key;
+}
+
+GXRModeObj * _findVideoMode(void){
+	GXRModeObj * mode;
+
+	switch(wiiSettings.video_mode)	{
+		case 1: // Progressive (480p)
+			mode = &TVNtsc480Prog;
+			break;
+		case 2: // NTSC (480i)
+			mode = &TVNtsc480IntDf;
+			break;
+		case 3: // NTSC (240p)
+			mode = &TVNtsc240Ds;
+			break;
+		case 4: // PAL (60Hz)
+			mode = &TVEurgb60Hz480IntDf;
+			break;
+		case 5: // PAL (50Hz)
+			mode = &TVPal576IntDfScale;
+			break;
+		case 6: // PAL (60Hz 240p)
+			mode = &TVEurgb60Hz240Ds;
+			break;
+		default:
+			mode = VIDEO_GetPreferredMode(0);
+			break;
+	}
+
+	bool pal = false;
+
+	if (mode == &TVPal576IntDfScale)
+		pal = true;
+
+	//mode->viWidth = 704; //Removed until fix
+
+	if (pal){
+		mode->viXOrigin = (VI_MAX_WIDTH_PAL - mode->viWidth) / 2;
+		mode->viYOrigin = (VI_MAX_HEIGHT_PAL - mode->viHeight) / 2;
+	}
+	else{
+		mode->viXOrigin = (VI_MAX_WIDTH_NTSC - mode->viWidth) / 2;
+		mode->viYOrigin = (VI_MAX_HEIGHT_NTSC - mode->viHeight) / 2;
+	}
+
+	return mode;
 }
