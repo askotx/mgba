@@ -8,7 +8,7 @@ struct WiiSettings{
 	char fullRomPath[256];
 	int render;
 	int video_mode;
-  int reduceScale;
+	int reduceScale;
 	bool useCustomInput;
 	char buttonA[5];
 	char buttonB[5];

@@ -261,13 +261,13 @@ int main(int argc, char *argv[]) {
 			}
 		}
 
-  short top = (CONF_GetAspectRatio() == CONF_ASPECT_16_9) ? 10 : 20;
-  short bottom = VIDEO_VERTICAL_PIXELS + top;
-  short left = 0;
-  short right = VIDEO_HORIZONTAL_PIXELS + left;
+	short top = (CONF_GetAspectRatio() == CONF_ASPECT_16_9) ? 10 : 20;
+	short bottom = VIDEO_VERTICAL_PIXELS + top;
+	short left = 0;
+	short right = VIDEO_HORIZONTAL_PIXELS + left;
 
-  int reduceHeight = (bottom - ((wiiSettings.reduceScale * bottom)/100)) / 2;
-  int reduceWidth = (right - ((wiiSettings.reduceScale * right)/100)) / 2;
+	int reduceHeight = (bottom - ((wiiSettings.reduceScale * bottom)/100)) / 2;
+	int reduceWidth = (right - ((wiiSettings.reduceScale * right)/100)) / 2;
 
 	guOrtho(proj, -(top + reduceHeight), bottom + reduceHeight, -(left + reduceWidth), right + reduceWidth, 0, 300); // matrix, t, b, l, r, n, f
 	GX_LoadProjectionMtx(proj, GX_ORTHOGRAPHIC);
@@ -294,9 +294,9 @@ int main(int argc, char *argv[]) {
 		keys = (!wiiSettings.useCustomInput) ? _pollGameInput() : _pollGameInputCustom();
 		GBAContextFrame(&context, keys);
 		if (goExit){
-      AUDIO_StopDMA(); 
-      break;
-    }
+			AUDIO_StopDMA(); 
+			break;
+		}
 	}
 
 	fclose(logfile);
@@ -307,7 +307,7 @@ int main(int argc, char *argv[]) {
 
 	free(renderer.outputBuffer);
 	GUIFontDestroy(font);
-  _stopGX();
+	_stopGX();
 
 	return 0;
 }
@@ -700,7 +700,7 @@ GXRModeObj * _findVideoMode(void){
 void _stopGX(void){
 	GX_AbortFrame();
 	GX_Flush();
-  VIDEO_ClearFrameBuffer(mode, framebuffer[whichFb], COLOR_BLACK);
+	VIDEO_ClearFrameBuffer(mode, framebuffer[whichFb], COLOR_BLACK);
 	VIDEO_SetBlack(TRUE);
 	VIDEO_Flush();
 }
