@@ -15,7 +15,7 @@
 #include "util/common.h"
 
 #include "gba/renderers/video-software.h"
-#include "gba/supervisor/context.h"
+#include "gba/context/context.h"
 #include "util/gui.h"
 #include "util/gui/file-select.h"
 #include "util/gui/font.h"
@@ -224,17 +224,16 @@ int main(int argc, char *argv[]) {
 #endif
 
 	char path[256];
-	guOrtho(proj, -20, 220, 0, 400, 0, 300);
-	GX_LoadProjectionMtx(proj, GX_ORTHOGRAPHIC);
-
 	if (wiiSettings.fullRomPath != NULL){
-		if (!GBAWiiLoadGame(wiiSettings.fullRomPath)){
+		if (!GBAContextLoadROM(&context, wiiSettings.fullRomPath, true)){
 			free(renderer.outputBuffer);
 			GUIFontDestroy(font);
 			return 1;
 		}
 	}
 	else {
+    guOrtho(proj, -20, 220, 0, 400, 0, 300);
+    GX_LoadProjectionMtx(proj, GX_ORTHOGRAPHIC);
 		struct GUIParams params = {
 			400, 230,
 			font, _drawStart, _drawEnd, _pollInput
@@ -286,7 +285,10 @@ int main(int argc, char *argv[]) {
 #endif
 		keys = (!wiiSettings.useCustomInput) ? _pollGameInput() : _pollGameInputCustom();
 		GBAContextFrame(&context, keys);
-		if (goExit) break;
+		if (goExit){
+      AUDIO_StopDMA(); 
+      break;
+    }
 	}
 
 	fclose(logfile);
@@ -665,7 +667,7 @@ GXRModeObj * _findVideoMode(void){
 			mode = &TVEurgb60Hz240Ds;
 			break;
 		default:
-			mode = VIDEO_GetPreferredMode(0);
+			mode = VIDEO_GetPreferredMode(NULL);
 			break;
 	}
 

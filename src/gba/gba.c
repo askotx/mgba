@@ -8,7 +8,7 @@
 #include "gba/bios.h"
 #include "gba/cheats.h"
 #include "gba/io.h"
-#include "gba/supervisor/rr.h"
+#include "gba/rr/rr.h"
 #include "gba/supervisor/thread.h"
 #include "gba/serialize.h"
 #include "gba/sio.h"
@@ -37,6 +37,12 @@ static void GBABreakpoint(struct ARMCore* cpu, int immediate);
 
 static bool _setSoftwareBreakpoint(struct ARMDebugger*, uint32_t address, enum ExecutionMode mode, uint32_t* opcode);
 static bool _clearSoftwareBreakpoint(struct ARMDebugger*, uint32_t address, enum ExecutionMode mode, uint32_t opcode);
+
+
+#ifdef _3DS
+extern uint32_t* romBuffer;
+extern size_t romBufferSize;
+#endif
 
 void GBACreate(struct GBA* gba) {
 	gba->d.id = GBA_COMPONENT_MAGIC;
@@ -110,10 +116,14 @@ void GBAUnloadROM(struct GBA* gba) {
 	gba->memory.rom = 0;
 
 	if (gba->romVf) {
+#ifndef _3DS
 		gba->romVf->unmap(gba->romVf, gba->pristineRom, gba->pristineRomSize);
+#endif
 		gba->pristineRom = 0;
 		gba->romVf = 0;
 	}
+
+	GBASavedataDeinit(&gba->memory.savedata);
 }
 
 void GBADestroy(struct GBA* gba) {
@@ -388,7 +398,7 @@ void GBADetachDebugger(struct GBA* gba) {
 	gba->cpu->components[GBA_COMPONENT_DEBUGGER] = 0;
 }
 
-void GBALoadROM(struct GBA* gba, struct VFile* vf, struct VFile* sav, const char* fname) {
+bool GBALoadROM(struct GBA* gba, struct VFile* vf, struct VFile* sav, const char* fname) {
 	GBAUnloadROM(gba);
 	gba->romVf = vf;
 	gba->pristineRomSize = vf->size(vf);
@@ -396,10 +406,18 @@ void GBALoadROM(struct GBA* gba, struct VFile* vf, struct VFile* sav, const char
 	if (gba->pristineRomSize > SIZE_CART0) {
 		gba->pristineRomSize = SIZE_CART0;
 	}
+#ifdef _3DS
+	gba->pristineRom = 0;
+	if (gba->pristineRomSize <= romBufferSize) {
+		gba->pristineRom = romBuffer;
+		vf->read(vf, romBuffer, gba->pristineRomSize);
+	}
+#else
 	gba->pristineRom = vf->map(vf, gba->pristineRomSize, MAP_READ);
+#endif
 	if (!gba->pristineRom) {
 		GBALog(gba, GBA_LOG_WARN, "Couldn't map ROM");
-		return;
+		return false;
 	}
 	gba->yankedRomSize = 0;
 	gba->memory.rom = gba->pristineRom;
@@ -409,6 +427,7 @@ void GBALoadROM(struct GBA* gba, struct VFile* vf, struct VFile* sav, const char
 	gba->romCrc32 = doCrc32(gba->memory.rom, gba->memory.romSize);
 	GBASavedataInit(&gba->memory.savedata, sav);
 	GBAHardwareInit(&gba->memory.hw, &((uint16_t*) gba->memory.rom)[GPIO_REG_DATA >> 1]);
+	return true;
 	// TODO: error check
 }
 
@@ -793,7 +812,7 @@ void GBAFrameEnded(struct GBA* gba) {
 		}
 	}
 
-	if (gba->stream) {
+	if (gba->stream && gba->stream->postVideoFrame) {
 		gba->stream->postVideoFrame(gba->stream, gba->video.renderer);
 	}
 
@@ -846,6 +865,12 @@ void GBAClearBreakpoint(struct GBA* gba, uint32_t address, enum ExecutionMode mo
 		GBAPatch16(gba->cpu, address, opcode, 0);
 	}
 }
+
+#if (!defined(USE_PTHREADS) && !defined(_WIN32)) || defined(DISABLE_THREADING)
+/*struct GBAThread* GBAThreadGetContext(void) {
+	return 0;
+}*/
+#endif
 
 static bool _setSoftwareBreakpoint(struct ARMDebugger* debugger, uint32_t address, enum ExecutionMode mode, uint32_t* opcode) {
 	GBASetBreakpoint((struct GBA*) debugger->cpu->master, &debugger->d, address, mode, opcode);

@@ -3,9 +3,9 @@
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-#include "gba/supervisor/context.h"
+#include "gba/context/context.h"
 
-#include "gba/supervisor/overrides.h"
+#include "gba/context/overrides.h"
 
 #include "util/memory.h"
 #include "util/vfs.h"
@@ -14,8 +14,10 @@ bool GBAContextInit(struct GBAContext* context, const char* port) {
 	context->gba = anonymousMemoryMap(sizeof(struct GBA));
 	context->cpu = anonymousMemoryMap(sizeof(struct ARMCore));
 	context->rom = 0;
+	context->fname = 0;
 	context->save = 0;
 	context->renderer = 0;
+	memset(context->components, 0, sizeof(context->components));
 
 	if (!context->gba || !context->cpu) {
 		if (context->gba) {
@@ -33,7 +35,7 @@ bool GBAContextInit(struct GBAContext* context, const char* port) {
 	}
 
 	GBACreate(context->gba);
-	ARMSetComponents(context->cpu, &context->gba->d, 0, 0);
+	ARMSetComponents(context->cpu, &context->gba->d, 0, context->components);
 	ARMInit(context->cpu);
 
 	context->gba->sync = 0;
@@ -41,18 +43,6 @@ bool GBAContextInit(struct GBAContext* context, const char* port) {
 }
 
 void GBAContextDeinit(struct GBAContext* context) {
-	if (context->bios) {
-		context->bios->close(context->bios);
-		context->bios = 0;
-	}
-	if (context->rom) {
-		context->rom->close(context->rom);
-		context->rom = 0;
-	}
-	if (context->save) {
-		context->save->close(context->save);
-		context->save = 0;
-	}
 	ARMDeinit(context->cpu);
 	GBADestroy(context->gba);
 	mappedMemoryFree(context->gba, 0);
@@ -72,10 +62,27 @@ bool GBAContextLoadROM(struct GBAContext* context, const char* path, bool autolo
 		return false;
 	}
 
+	context->fname = path;
 	if (autoloadSave) {
 		context->save = VDirOptionalOpenFile(0, path, 0, ".sav", O_RDWR | O_CREAT);
 	}
 	return true;
+}
+
+void GBAContextUnloadROM(struct GBAContext* context) {
+	GBAUnloadROM(context->gba);
+	if (context->bios) {
+		context->bios->close(context->bios);
+		context->bios = 0;
+	}
+	if (context->rom) {
+		context->rom->close(context->rom);
+		context->rom = 0;
+	}
+	if (context->save) {
+		context->save->close(context->save);
+		context->save = 0;
+	}
 }
 
 bool GBAContextLoadROMFromVFile(struct GBAContext* context, struct VFile* rom, struct VFile* save) {
@@ -112,17 +119,22 @@ bool GBAContextLoadBIOSFromVFile(struct GBAContext* context, struct VFile* bios)
 }
 
 bool GBAContextStart(struct GBAContext* context) {
-	struct GBAOptions opts = {};
-	GBAConfigMap(&context->config, &opts);
+	struct GBAOptions opts = { .bios = 0 };
 
 	if (context->renderer) {
 		GBAVideoAssociateRenderer(&context->gba->video, context->renderer);
 	}
 
-	GBALoadROM(context->gba, context->rom, context->save, 0);
+	if (!GBALoadROM(context->gba, context->rom, context->save, context->fname)) {
+		return false;
+	}
+
+	GBAConfigMap(&context->config, &opts);
 	if (opts.useBios && context->bios) {
 		GBALoadBIOS(context->gba, context->bios);
 	}
+	context->gba->logLevel = opts.logLevel;
+	context->gba->idleOptimization = opts.idleOptimization;
 
 	ARMReset(context->cpu);
 

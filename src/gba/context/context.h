@@ -8,7 +8,7 @@
 
 #include "util/common.h"
 
-#include "gba/supervisor/config.h"
+#include "gba/context/config.h"
 #include "gba/input.h"
 
 struct GBAContext {
@@ -16,8 +16,10 @@ struct GBAContext {
 	struct ARMCore* cpu;
 	struct GBAVideoRenderer* renderer;
 	struct VFile* rom;
+	const char* fname;
 	struct VFile* save;
 	struct VFile* bios;
+	struct ARMComponent* components[GBA_COMPONENT_MAX];
 	struct GBAConfig config;
 	struct GBAOptions opts;
 	struct GBAInputMap inputMap;
@@ -30,6 +32,7 @@ bool GBAContextLoadROM(struct GBAContext* context, const char* path, bool autolo
 bool GBAContextLoadROMFromVFile(struct GBAContext* context, struct VFile* rom, struct VFile* save);
 bool GBAContextLoadBIOS(struct GBAContext* context, const char* path);
 bool GBAContextLoadBIOSFromVFile(struct GBAContext* context, struct VFile* bios);
+void GBAContextUnloadROM(struct GBAContext* context);
 
 bool GBAContextStart(struct GBAContext* context);
 void GBAContextStop(struct GBAContext* context);

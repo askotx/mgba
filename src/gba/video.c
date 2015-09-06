@@ -5,11 +5,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #include "video.h"
 
+#include "gba/context/sync.h"
 #include "gba/gba.h"
 #include "gba/io.h"
+#include "gba/rr/rr.h"
 #include "gba/serialize.h"
-#include "gba/supervisor/rr.h"
-#include "gba/supervisor/sync.h"
 
 #include "util/memory.h"
 
@@ -22,7 +22,7 @@ static void GBAVideoDummyRendererWritePalette(struct GBAVideoRenderer* renderer,
 static void GBAVideoDummyRendererWriteOAM(struct GBAVideoRenderer* renderer, uint32_t oam);
 static void GBAVideoDummyRendererDrawScanline(struct GBAVideoRenderer* renderer, int y);
 static void GBAVideoDummyRendererFinishFrame(struct GBAVideoRenderer* renderer);
-static void GBAVideoDummyRendererGetPixels(struct GBAVideoRenderer* renderer, unsigned* stride, void** pixels);
+static void GBAVideoDummyRendererGetPixels(struct GBAVideoRenderer* renderer, unsigned* stride, const void** pixels);
 
 const int GBAVideoObjSizes[16][2] = {
 	{ 8, 8 },
@@ -62,7 +62,13 @@ void GBAVideoInit(struct GBAVideo* video) {
 }
 
 void GBAVideoReset(struct GBAVideo* video) {
-	video->vcount = VIDEO_VERTICAL_TOTAL_PIXELS - 1;
+	if (video->p->memory.fullBios) {
+		video->vcount = 0;
+	} else {
+		// TODO: Verify exact scanline hardware
+		video->vcount = 0x7E;
+	}
+	video->p->memory.io[REG_VCOUNT >> 1] = video->vcount;
 
 	video->lastHblank = 0;
 	video->nextHblank = VIDEO_HDRAW_LENGTH;
@@ -254,7 +260,7 @@ static void GBAVideoDummyRendererFinishFrame(struct GBAVideoRenderer* renderer) 
 	// Nothing to do
 }
 
-static void GBAVideoDummyRendererGetPixels(struct GBAVideoRenderer* renderer, unsigned* stride, void** pixels) {
+static void GBAVideoDummyRendererGetPixels(struct GBAVideoRenderer* renderer, unsigned* stride, const void** pixels) {
 	UNUSED(renderer);
 	UNUSED(stride);
 	UNUSED(pixels);
