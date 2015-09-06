@@ -22,6 +22,9 @@ void _wiiParseArgs(int argc, char *argv[]){
 		if (strcasecmp (argv [i], "-video_mode") == 0 && (i + 1 < argc)){
 			wiiSettings.video_mode = atoi (argv [++i]);
 		}
+    if (strcasecmp (argv [i], "-reduceScale") == 0 && (i + 1 < argc)){
+			wiiSettings.reduceScale = atoi (argv [++i]);
+		}
 		if (strcasecmp (argv [i], "-useCustomInput") == 0){
 			wiiSettings.useCustomInput = true;
 		}
@@ -47,6 +50,9 @@ void _fixInvalidSettings(){
 	}
 	if(!(wiiSettings.render >= 0 && wiiSettings.render < 5)){
 		wiiSettings.render = 1;
+	}
+  if(wiiSettings.reduceScale < 50 || wiiSettings.reduceScale > 100){
+		wiiSettings.reduceScale = 100;
 	}
 	if(strcasecmp (wiiSettings.buttonA, "") == 0 || wiiSettings.buttonA == NULL){
 		snprintf(wiiSettings.buttonA, 5, "%s","A");

@@ -82,6 +82,7 @@ static bool goExit = false;
 static uint16_t _pollGameInputCustom(void);
 static u32 _getWiiButton(char btnName[5]);
 GXRModeObj * _findVideoMode(void);
+void _stopGX(void);
 
 static void* framebuffer[2];
 static int whichFb = 0;
@@ -218,7 +219,7 @@ int main(int argc, char *argv[]) {
 	GBAAudioResizeBuffer(&context.gba->audio, SAMPLES);
 
 #if RESAMPLE_LIBRARY == RESAMPLE_BLIP_BUF
-	double ratio = GBAAudioCalculateRatio(1, 60, 1);
+	double ratio = GBAAudioCalculateRatio(1, 60 / 1.001, 1);
 	blip_set_rates(context.gba->audio.left,  GBA_ARM7TDMI_FREQUENCY, 48000 * ratio);
 	blip_set_rates(context.gba->audio.right, GBA_ARM7TDMI_FREQUENCY, 48000 * ratio);
 #endif
@@ -260,8 +261,15 @@ int main(int argc, char *argv[]) {
 			}
 		}
 
-	int overscan = (CONF_GetAspectRatio() == CONF_ASPECT_16_9) ? 10 : 20;
-	guOrtho(proj, -(overscan), VIDEO_VERTICAL_PIXELS + overscan, 0, VIDEO_HORIZONTAL_PIXELS, 0, 300);
+  short top = (CONF_GetAspectRatio() == CONF_ASPECT_16_9) ? 10 : 20;
+  short bottom = VIDEO_VERTICAL_PIXELS + top;
+  short left = 0;
+  short right = VIDEO_HORIZONTAL_PIXELS + left;
+
+  int reduceHeight = (bottom - ((wiiSettings.reduceScale * bottom)/100)) / 2;
+  int reduceWidth = (right - ((wiiSettings.reduceScale * right)/100)) / 2;
+
+	guOrtho(proj, -(top + reduceHeight), bottom + reduceHeight, -(left + reduceWidth), right + reduceWidth, 0, 300); // matrix, t, b, l, r, n, f
 	GX_LoadProjectionMtx(proj, GX_ORTHOGRAPHIC);
 
 	uint16_t keys = 0;
@@ -299,6 +307,7 @@ int main(int argc, char *argv[]) {
 
 	free(renderer.outputBuffer);
 	GUIFontDestroy(font);
+  _stopGX();
 
 	return 0;
 }
@@ -676,8 +685,6 @@ GXRModeObj * _findVideoMode(void){
 	if (mode == &TVPal576IntDfScale)
 		pal = true;
 
-	//mode->viWidth = 704; //Removed until fix
-
 	if (pal){
 		mode->viXOrigin = (VI_MAX_WIDTH_PAL - mode->viWidth) / 2;
 		mode->viYOrigin = (VI_MAX_HEIGHT_PAL - mode->viHeight) / 2;
@@ -688,4 +695,12 @@ GXRModeObj * _findVideoMode(void){
 	}
 
 	return mode;
+}
+
+void _stopGX(void){
+	GX_AbortFrame();
+	GX_Flush();
+  VIDEO_ClearFrameBuffer(mode, framebuffer[whichFb], COLOR_BLACK);
+	VIDEO_SetBlack(TRUE);
+	VIDEO_Flush();
 }
