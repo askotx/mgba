@@ -13,8 +13,8 @@
 
 void _wiiParseArgs(int argc, char *argv[]){
 	for (int i = 1; i < argc; i++){
-		if (strcasecmp (argv [i], "-rom") == 0 && (i + 1 < argc) && (i + 2 < argc) && (i + 3 < argc)){
-			snprintf(wiiSettings.fullRomPath, 256, "%s%s%s",argv [i+1], argv [i+2], argv [i+3]);
+		if (strcasecmp (argv [i], "-rom") == 0 && (i + 1 < argc)){
+			snprintf(wiiSettings.fullRomPath, 256, "%s",argv [i+1]);
 		}
 		if (strcasecmp (argv [i], "-r") == 0 && (i + 1 < argc)){
 			wiiSettings.render = atoi (argv [++i]);

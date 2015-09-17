@@ -24,7 +24,6 @@
 #include "util/vfs.h"
 
 #include "wii-settings.h"
-//#include "wii-mem2.h"
 
 #define SAMPLES 1024
 
@@ -101,7 +100,6 @@ int main(int argc, char *argv[]) {
 	AUDIO_Init(0);
 	AUDIO_SetDSPSampleRate(AI_SAMPLERATE_48KHZ);
 	AUDIO_RegisterDMACallback(_audioDMA);
-	//InitMem2Manager();
 	
 	_wiiParseArgs(argc, argv);
 
@@ -302,7 +300,6 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	free(texmem);
 	free(fifo);
 
 	GBAContextStop(&context);
