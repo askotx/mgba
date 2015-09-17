@@ -690,9 +690,12 @@ GXRModeObj * _findVideoMode(void){
 }
 
 void _stopGX(void){
-	GX_AbortFrame();
-	GX_Flush();
 
 	VIDEO_SetBlack(TRUE);
+	VIDEO_ClearFrameBuffer(mode, framebuffer[0], COLOR_BLACK);
+	VIDEO_ClearFrameBuffer(mode, framebuffer[1], COLOR_BLACK);
 	VIDEO_Flush();
+	//VIDEO_WaitVSync();
+	GX_AbortFrame();
+	GX_Flush();
 }
