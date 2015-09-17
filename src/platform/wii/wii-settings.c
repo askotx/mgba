@@ -40,6 +40,10 @@ void _wiiParseArgs(int argc, char *argv[]){
 		if (strcasecmp (argv [i], "-button_R") == 0 && (i + 1 < argc)){
 			snprintf(wiiSettings.buttonR, 5, "%s",argv [i+1]);
 		}
+		if (strcasecmp (argv [i], "-volume") == 0 && (i + 1 < argc)){
+			wiiSettings.volume = atoi (argv [++i]);
+		}
+
 	}
 	_fixInvalidSettings();
 }
@@ -53,6 +57,9 @@ void _fixInvalidSettings(){
 	}
 	if(wiiSettings.reduceScale < 50 || wiiSettings.reduceScale > 100){
 		wiiSettings.reduceScale = 100;
+	}
+	if (wiiSettings.volume < 1 || wiiSettings.volume > GBA_AUDIO_VOLUME_MAX){
+		wiiSettings.volume = GBA_AUDIO_VOLUME_MAX;
 	}
 	if(strcasecmp (wiiSettings.buttonA, "") == 0 || wiiSettings.buttonA == NULL){
 		snprintf(wiiSettings.buttonA, 5, "%s","A");

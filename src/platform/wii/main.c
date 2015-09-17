@@ -16,17 +16,18 @@
 
 #include "gba/renderers/video-software.h"
 #include "gba/context/context.h"
+#include "gba/audio.h"
+
 #include "util/gui.h"
 #include "util/gui/file-select.h"
 #include "util/gui/font.h"
 #include "util/vfs.h"
 
 #include "wii-settings.h"
-#include "wii-mem2.h"
+//#include "wii-mem2.h"
 
 #define SAMPLES 1024
 
-static void GBAWiiLog(struct GBAThread* thread, enum GBALogLevel level, const char* format, va_list args);
 static void GBAWiiFrame(void);
 static bool GBAWiiLoadGame(const char* path);
 
@@ -48,7 +49,7 @@ static struct GBAVideoSoftwareRenderer renderer;
 static struct GBAAVStream stream;
 static struct GBARumble rumble;
 static struct GBARotationSource rotation;
-static FILE* logfile;
+
 static GXRModeObj* mode;
 static Mtx model, view, modelview;
 static uint16_t* texmem;
@@ -100,7 +101,7 @@ int main(int argc, char *argv[]) {
 	AUDIO_Init(0);
 	AUDIO_SetDSPSampleRate(AI_SAMPLERATE_48KHZ);
 	AUDIO_RegisterDMACallback(_audioDMA);
-	InitMem2Manager();
+	//InitMem2Manager();
 	
 	_wiiParseArgs(argc, argv);
 
@@ -186,8 +187,6 @@ int main(int argc, char *argv[]) {
 
 	fatInitDefault();
 
-	logfile = fopen("/mgba.log", "w");
-
 	stream.postAudioFrame = 0;
 	stream.postAudioBuffer = 0;
 	stream.postVideoFrame = _postVideoFrame;
@@ -199,16 +198,20 @@ int main(int argc, char *argv[]) {
 	rotation.readTiltY = _readTiltY;
 	rotation.readGyroZ = _readGyroZ;
 
-	GBAContextInit(&context, 0);
+	GBAContextInit(&context, "wii");
+	char biosPath[64];
+	snprintf(biosPath, 64, "/mgba/gba_bios.bin");
 	struct GBAOptions opts = {
+		.bios = biosPath,
 		.useBios = true,
-		.logLevel = 0,
+		.logLevel = GBA_LOG_WARN | GBA_LOG_ERROR | GBA_LOG_FATAL | GBA_LOG_STATUS,
 		.idleOptimization = IDLE_LOOP_DETECT
 	};
 	GBAConfigLoadDefaults(&context.config, &opts);
-	context.gba->logHandler = GBAWiiLog;
+	GBAConfigLoad(&context.config);
 	context.gba->stream = &stream;
 	context.gba->rumble = &rumble;
+	//context.gba->audio.masterVolume = (wiiSettings.volume != 0) ? wiiSettings.volume : GBA_AUDIO_VOLUME_MAX;
 	context.gba->rotationSource = &rotation;
 
 	GBAVideoSoftwareRendererCreate(&renderer);
@@ -299,10 +302,13 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	fclose(logfile);
+	free(texmem);
 	free(fifo);
 
 	GBAContextStop(&context);
+	if (&context.config.port){
+		GBAConfigSave(&context.config);
+	}
 	GBAContextDeinit(&context);
 
 	free(renderer.outputBuffer);
@@ -358,17 +364,6 @@ bool GBAWiiLoadGame(const char* path) {
 	_drawEnd();
 
 	return GBAContextLoadROM(&context, path, true);
-}
-
-void GBAWiiLog(struct GBAThread* thread, enum GBALogLevel level, const char* format, va_list args) {
-	UNUSED(thread);
-	UNUSED(level);
-	if (!logfile) {
-		return;
-	}
-	vfprintf(logfile, format, args);
-	fprintf(logfile, "\n");
-	fflush(logfile);
 }
 
 static void _postVideoFrame(struct GBAAVStream* stream, struct GBAVideoRenderer* renderer) {
@@ -700,7 +695,7 @@ GXRModeObj * _findVideoMode(void){
 void _stopGX(void){
 	GX_AbortFrame();
 	GX_Flush();
-	VIDEO_ClearFrameBuffer(mode, framebuffer[whichFb], COLOR_BLACK);
+
 	VIDEO_SetBlack(TRUE);
 	VIDEO_Flush();
 }

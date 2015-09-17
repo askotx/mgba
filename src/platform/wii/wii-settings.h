@@ -4,6 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "gba/audio.h"
+
 struct WiiSettings{
 	char fullRomPath[256];
 	int render;
@@ -14,6 +16,7 @@ struct WiiSettings{
 	char buttonB[5];
 	char buttonL[5];
 	char buttonR[5];
+	int volume;
 };
 
 extern struct WiiSettings wiiSettings;

@@ -45,6 +45,22 @@ struct GraphicsOpts {
 	bool fullscreen;
 };
 
+#ifdef HW_RVL
+struct WiiSettingsOpts{
+	char *fullRomPath;
+	int render;
+	int video_mode;
+	int reduceScale;
+	bool useCustomInput;
+	char* buttonA;
+	char* buttonB;
+	char* buttonL;
+	char* buttonR;
+};
+
+void initParserForWiiSettings(struct SubParser* parser, struct WiiSettingsOpts* opts);
+#endif
+
 struct GBAThread;
 
 bool parseArguments(struct GBAArguments* opts, struct GBAConfig* config, int argc, char* const* argv,

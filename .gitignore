@@ -6,3 +6,6 @@
 *.a
 *.o
 *.elf
+*.dol
+*.pnproj
+*.pnps

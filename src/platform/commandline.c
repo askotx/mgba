@@ -47,10 +47,24 @@ static const struct option _options[] = {
 	{ "help",      no_argument, 0, 'h' },
 	{ "movie",     required_argument, 0, 'v' },
 	{ "patch",     required_argument, 0, 'p' },
+#ifdef HW_RVL
+	{ "render",    required_argument, 0, 'F' },
+	{ "videomode", required_argument, 0, 'V' },
+	{ "scale",     required_argument, 0, 'S' },
+	{ "custominp", no_argument, 0, 'C' },
+	{ "buttonA",   required_argument, 0, 'A' },
+	{ "buttonB",   required_argument, 0, 'B' },
+	{ "buttonL",   required_argument, 0, 'L' },
+	{ "buttonR",   required_argument, 0, 'R' },
+#endif
 	{ 0, 0, 0, 0 }
 };
 
 static bool _parseGraphicsArg(struct SubParser* parser, struct GBAConfig* config, int option, const char* arg);
+
+#ifdef HW_RVL
+static bool _parseWiiSettingsArg(struct SubParser* parser, struct GBAConfig* config, int option, const char* arg);
+#endif
 
 bool parseArguments(struct GBAArguments* opts, struct GBAConfig* config, int argc, char* const* argv, struct SubParser* subparser) {
 	int ch;
@@ -61,6 +75,9 @@ bool parseArguments(struct GBAArguments* opts, struct GBAConfig* config, int arg
 #endif
 #ifdef USE_GDB_STUB
 		"g"
+#endif
+#ifdef HW_RVL
+		"G:F:V:S:CA:B:L:R"
 #endif
 	;
 	memset(opts, 0, sizeof(*opts));
@@ -124,7 +141,12 @@ bool parseArguments(struct GBAArguments* opts, struct GBAConfig* config, int arg
 	if (argc != 1) {
 		return opts->showHelp;
 	}
+	
+#ifndef HW_RVL
 	opts->fname = strdup(argv[0]);
+#else
+	opts->fname = strdup(argv[1]);
+#endif
 	return true;
 }
 
@@ -232,3 +254,55 @@ void usage(const char* arg0, const char* extraOptions) {
 		puts(extraOptions);
 	}
 }
+
+#ifdef HW_RVL
+void initParserForWiiSettings(struct SubParser* parser, struct WiiSettingsOpts* opts) {
+	//parser->usage = GRAPHICS_USAGE;
+	parser->opts = opts;
+	parser->parse = _parseWiiSettingsArg;
+	//parser->extraOptions = GRAPHICS_OPTIONS;
+	opts->render = 0;
+	opts->video_mode = 0;
+	opts->reduceScale = 100;
+	opts->useCustomInput = false;
+	opts->buttonA = strdup("A");
+	opts->buttonB = strdup("B");
+	opts->buttonL = strdup("L");
+	opts->buttonR = strdup("R");
+}
+
+static bool _parseWiiSettingsArg(struct SubParser* parser, struct GBAConfig* config, int option, const char* arg){
+	UNUSED(config);
+	struct WiiSettingsOpts* wiiSettingsOpts = parser->opts;
+	switch (option) {
+		case 'G':
+			wiiSettingsOpts->fullRomPath = strdup(arg);
+			break;
+		case 'F':
+			wiiSettingsOpts->render = atoi(arg);
+			break;
+		case 'V':
+			wiiSettingsOpts->video_mode = atoi(arg);
+			break;
+		case 'S':
+			wiiSettingsOpts->reduceScale = atoi(arg);
+			break;
+		case 'C':
+			wiiSettingsOpts->useCustomInput = true;
+			break;
+		case 'A':
+			wiiSettingsOpts->buttonA = strdup(arg);
+		case 'B':
+			wiiSettingsOpts->buttonB = strdup(arg);
+		case 'L':
+			wiiSettingsOpts->buttonL = strdup(arg);
+		case 'R':
+			wiiSettingsOpts->buttonR = strdup(arg);
+			break;
+		default:
+			return false;
+			break;
+	}
+	return true;
+}
+#endif

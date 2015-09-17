@@ -38,7 +38,7 @@ INCLUDES	:=  src src/arm
 #---------------------------------------------------------------------------------
 CFLAGS = -g -O3 -mrvl $(MACHDEP) $(INCLUDE) $(DEFS) -Wall -Wextra -std=c99 \
         -DCOLOR_16_BIT -DCOLOR_5_6_5 -DUSE_VFS_FILE -DRESAMPLE_LIBRARY=RESAMPLE_BLIP_BUF \
-				-DBINARY_NAME='mgba' -DDISABLE_THREADING
+        -DDISABLE_THREADING -DBINARY_NAME=mgba
 
 CXXFLAGS	=	$(CFLAGS)
 
