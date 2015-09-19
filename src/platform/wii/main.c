@@ -81,7 +81,6 @@ static bool goExit = false;
 
 static uint16_t _pollGameInputCustom(void);
 static u32 _getWiiButton(char btnName[5]);
-GXRModeObj * _findVideoMode(void);
 void _stopGX(void);
 static s8 WPAD_StickX(u8 chan,u8 right);
 static s8 WPAD_StickY(u8 chan,u8 right);
@@ -207,8 +206,8 @@ int main(int argc, char *argv[]) {
 		.logLevel = GBA_LOG_WARN | GBA_LOG_ERROR | GBA_LOG_FATAL | GBA_LOG_STATUS,
 		.idleOptimization = IDLE_LOOP_DETECT
 	};
-	GBAConfigLoadDefaults(&context.config, &opts);
 	GBAConfigLoad(&context.config);
+	GBAConfigLoadDefaults(&context.config, &opts);
 	context.gba->stream = &stream;
 	context.gba->rumble = &rumble;
 	//context.gba->audio.masterVolume = (wiiSettings.volume != 0) ? wiiSettings.volume : GBA_AUDIO_VOLUME_MAX;
@@ -651,50 +650,6 @@ static u32 _getWiiButton(char btnName[5]){
 		}
 	}
 	return key;
-}
-
-GXRModeObj * _findVideoMode(void){
-	GXRModeObj * mode;
-
-	switch(wiiSettings.video_mode)	{
-		case 1: // Progressive (480p)
-			mode = &TVNtsc480Prog;
-			break;
-		case 2: // NTSC (480i)
-			mode = &TVNtsc480IntDf;
-			break;
-		case 3: // NTSC (240p)
-			mode = &TVNtsc240Ds;
-			break;
-		case 4: // PAL (60Hz)
-			mode = &TVEurgb60Hz480IntDf;
-			break;
-		case 5: // PAL (50Hz)
-			mode = &TVPal576IntDfScale;
-			break;
-		case 6: // PAL (60Hz 240p)
-			mode = &TVEurgb60Hz240Ds;
-			break;
-		default:
-			mode = VIDEO_GetPreferredMode(NULL);
-			break;
-	}
-
-	bool pal = false;
-
-	if (mode == &TVPal576IntDfScale)
-		pal = true;
-
-	if (pal){
-		mode->viXOrigin = (VI_MAX_WIDTH_PAL - mode->viWidth) / 2;
-		mode->viYOrigin = (VI_MAX_HEIGHT_PAL - mode->viHeight) / 2;
-	}
-	else{
-		mode->viXOrigin = (VI_MAX_WIDTH_NTSC - mode->viWidth) / 2;
-		mode->viYOrigin = (VI_MAX_HEIGHT_NTSC - mode->viHeight) / 2;
-	}
-
-	return mode;
 }
 
 void _stopGX(void){
