@@ -456,7 +456,7 @@ static uint16_t _pollGameInput(void){
 	if (x > 0x40 || w_x > 0x40) {
 		keys |= 1 << GBA_KEY_RIGHT;
 	}
-	if (y < -0x40 || w_y <- 0x40) {
+	if (y < -0x40 || w_y < -0x40) {
 		keys |= 1 << GBA_KEY_DOWN;
 	}
 	if (y > 0x40 || w_y > 0x40) {
@@ -488,7 +488,7 @@ static int _pollInput(void) {
 	if (x > 0x40 || w_x > 0x40) {
 		keys |= 1 << GUI_INPUT_RIGHT;
 	}
-	if (y < -0x40 || w_y <- 0x40) {
+	if (y < -0x40 || w_y < -0x40) {
 		keys |= 1 << GUI_INPUT_DOWN;
 	}
 	if (y > 0x40 || w_y > 0x40) {
@@ -627,7 +627,7 @@ static uint16_t _pollGameInputCustom(void){
 	if (x > 0x40 || w_x > 0x40) {
 		keys |= 1 << GBA_KEY_RIGHT;
 	}
-	if (y < -0x40 || w_y <- 0x40) {
+	if (y < -0x40 || w_y < -0x40) {
 		keys |= 1 << GBA_KEY_DOWN;
 	}
 	if (y > 0x40 || w_y > 0x40) {
