@@ -7,6 +7,7 @@
 
 #include <fat.h>
 #include <gccore.h>
+#include <ogc/machine/processor.h>
 #include <malloc.h>
 #include <strings.h>
 #include <unistd.h>
@@ -26,6 +27,8 @@
 #include "wii-settings.h"
 
 #define SAMPLES 1024
+
+static void _retraceCallback(u32 count);
 
 static void GBAWiiFrame(void);
 static bool GBAWiiLoadGame(const char* path);
@@ -49,13 +52,15 @@ static struct GBAAVStream stream;
 static struct GBARumble rumble;
 static struct GBARotationSource rotation;
 
-static GXRModeObj* mode;
+static GXRModeObj* vmode;
 static Mtx model, view, modelview;
 static uint16_t* texmem;
 static GXTexObj tex;
 static int32_t tiltX;
 static int32_t tiltY;
 static int32_t gyroZ;
+static uint32_t retraceCount;
+static uint32_t referenceRetraceCount;
 
 struct _btn_map {
 	u32 btnId;				// button 'id'
@@ -85,7 +90,7 @@ void _stopGX(void);
 static s8 WPAD_StickX(u8 chan,u8 right);
 static s8 WPAD_StickY(u8 chan,u8 right);
 
-static void* framebuffer[2];
+static void* framebuffer[2] = { 0, 0 };
 static int whichFb = 0;
 
 static struct GBAStereoSample audioBuffer[3][SAMPLES] __attribute__((__aligned__(32)));
@@ -93,6 +98,38 @@ static volatile size_t audioBufferSize = 0;
 static volatile int currentAudioBuffer = 0;
 
 static struct GUIFont* font;
+
+static void reconfigureScreen(GXRModeObj* vmode) {
+	free(framebuffer[0]);
+	free(framebuffer[1]);
+
+	framebuffer[0] = SYS_AllocateFramebuffer(vmode);
+	framebuffer[1] = SYS_AllocateFramebuffer(vmode);
+
+	VIDEO_SetBlack(true);
+	VIDEO_Configure(vmode);
+	VIDEO_SetNextFramebuffer(framebuffer[whichFb]);
+	VIDEO_SetBlack(false);
+	VIDEO_Flush();
+	VIDEO_WaitVSync();
+	if (vmode->viTVMode & VI_NON_INTERLACE) {
+		VIDEO_WaitVSync();
+	}
+	GX_SetViewport(0, 0, vmode->fbWidth, vmode->efbHeight, 0, 1);
+
+	f32 yscale = GX_GetYScaleFactor(vmode->efbHeight, vmode->xfbHeight);
+	u32 xfbHeight = GX_SetDispCopyYScale(yscale);
+	GX_SetScissor(0, 0, vmode->viWidth, vmode->viWidth);
+	GX_SetDispCopySrc(0, 0, vmode->fbWidth, vmode->efbHeight);
+	GX_SetDispCopyDst(vmode->fbWidth, xfbHeight);
+	u8 sharp[7] = {0,0,21,22,21,0,0};
+	u8 soft[7] = {8,8,10,12,10,8,8};
+	u8* vfilter = wiiSettings.render == 3 ? sharp : wiiSettings.render == 4 ? soft : vmode->vfilter;
+	GX_SetCopyFilter (vmode->aa, vmode->sample_pattern, (wiiSettings.render != 2) ? GX_TRUE : GX_FALSE, vfilter);
+	
+	GX_SetFieldMode(vmode->field_rendering, ((vmode->viHeight == 2 * vmode->xfbHeight) ? GX_ENABLE : GX_DISABLE));
+};
+
 
 int main(int argc, char *argv[]) {
 	VIDEO_Init();
@@ -110,38 +147,15 @@ int main(int argc, char *argv[]) {
 #error This pixel format is unsupported. Please use -DCOLOR_16-BIT -DCOLOR_5_6_5
 #endif
 
-	mode = VIDEO_GetPreferredMode(0);
-	framebuffer[0] = SYS_AllocateFramebuffer(mode);
-	framebuffer[1] = SYS_AllocateFramebuffer(mode);
-
-	VIDEO_Configure(mode);
-	VIDEO_SetNextFramebuffer(framebuffer[whichFb]);
-	VIDEO_SetBlack(FALSE);
-	VIDEO_Flush();
-	VIDEO_WaitVSync();
-	if (mode->viTVMode & VI_NON_INTERLACE) {
-		VIDEO_WaitVSync();
-	}
+	vmode = VIDEO_GetPreferredMode(0);
 
 	GXColor bg = { 0, 0, 0, 0xFF };
 	void* fifo = memalign(32, 0x40000);
 	memset(fifo, 0, 0x40000);
 	GX_Init(fifo, 0x40000);
 	GX_SetCopyClear(bg, 0x00FFFFFF);
-	GX_SetViewport(0, 0, mode->fbWidth, mode->efbHeight, 0, 1);
 
-	f32 yscale = GX_GetYScaleFactor(mode->efbHeight, mode->xfbHeight);
-	u32 xfbHeight = GX_SetDispCopyYScale(yscale);
-	GX_SetScissor(0, 0, mode->viWidth, mode->viWidth);
-	GX_SetDispCopySrc(0, 0, mode->fbWidth, mode->efbHeight);
-	GX_SetDispCopyDst(mode->fbWidth, xfbHeight);
-	
-	u8 sharp[7] = {0,0,21,22,21,0,0};
-	u8 soft[7] = {8,8,10,12,10,8,8};
-	u8* vfilter = wiiSettings.render == 3 ? sharp : wiiSettings.render == 4 ? soft : mode->vfilter;
-	GX_SetCopyFilter (mode->aa, mode->sample_pattern, (wiiSettings.render != 2) ? GX_TRUE : GX_FALSE, vfilter);
-	
-	GX_SetFieldMode(mode->field_rendering, ((mode->viHeight == 2 * mode->xfbHeight) ? GX_ENABLE : GX_DISABLE));
+	reconfigureScreen(vmode);
 
 	GX_SetCullMode(GX_CULL_NONE);
 	GX_CopyDisp(framebuffer[whichFb], GX_TRUE);
@@ -182,6 +196,8 @@ int main(int argc, char *argv[]) {
 	if (wiiSettings.render == 2)
 		GX_InitTexObjLOD(&tex,GX_NEAR,GX_NEAR_MIP_NEAR,2.5,9.0,0.0,GX_FALSE,GX_FALSE,GX_ANISO_1);
 
+	VIDEO_SetPostRetraceCallback(_retraceCallback);
+
 	font = GUIFontCreate();
 
 	fatInitDefault();
@@ -210,7 +226,6 @@ int main(int argc, char *argv[]) {
 	GBAConfigLoadDefaults(&context.config, &opts);
 	context.gba->stream = &stream;
 	context.gba->rumble = &rumble;
-	//context.gba->audio.masterVolume = (wiiSettings.volume != 0) ? wiiSettings.volume : GBA_AUDIO_VOLUME_MAX;
 	context.gba->rotationSource = &rotation;
 
 	GBAVideoSoftwareRendererCreate(&renderer);
@@ -226,17 +241,17 @@ int main(int argc, char *argv[]) {
 	blip_set_rates(context.gba->audio.right, GBA_ARM7TDMI_FREQUENCY, 48000 * ratio);
 #endif
 
-	char path[256];
-	if (wiiSettings.fullRomPath != NULL){
-		if (!GBAContextLoadROM(&context, wiiSettings.fullRomPath, true)){
+	if (wiiSettings.fullRomPath != NULL) {
+		if (!GBAContextLoadROMAndSaveDir(&context, wiiSettings.fullRomPath, wiiSettings.savePath, wiiSettings.saveName, true)) {
 			free(renderer.outputBuffer);
 			GUIFontDestroy(font);
 			return 1;
 		}
 	}
 	else {
-    guOrtho(proj, -20, 220, 0, 400, 0, 300);
-    GX_LoadProjectionMtx(proj, GX_ORTHOGRAPHIC);
+		char path[256];
+		guOrtho(proj, -20, 220, 0, 400, 0, 300);
+		GX_LoadProjectionMtx(proj, GX_ORTHOGRAPHIC);
 		struct GUIParams params = {
 			400, 230,
 			font, _drawStart, _drawEnd, _pollInput
@@ -296,7 +311,8 @@ int main(int argc, char *argv[]) {
 		keys = (!wiiSettings.useCustomInput) ? _pollGameInput() : _pollGameInputCustom();
 		GBAContextFrame(&context, keys);
 		if (goExit){
-			AUDIO_StopDMA(); 
+			AUDIO_StopDMA();
+			_stopGX();
 			break;
 		}
 	}
@@ -311,7 +327,9 @@ int main(int argc, char *argv[]) {
 
 	free(renderer.outputBuffer);
 	GUIFontDestroy(font);
-	_stopGX();
+
+	free(framebuffer[0]);
+	free(framebuffer[1]);
 
 	return 0;
 }
@@ -381,10 +399,17 @@ static void _audioDMA(void) {
 }
 
 static void _drawStart(void) {
+	u32 level = 0;
+	_CPU_ISR_Disable(level);
+	if (referenceRetraceCount >= retraceCount) {
+		VIDEO_WaitVSync();
+	}
+	_CPU_ISR_Restore(level);
+
 	GX_SetZMode(GX_TRUE, GX_LEQUAL, GX_TRUE);
 	GX_SetColorUpdate(GX_TRUE);
 
-	GX_SetViewport(0, 0, mode->fbWidth, mode->efbHeight, 0, 1);
+	GX_SetViewport(0, 0, vmode->fbWidth, vmode->efbHeight, 0, 1);
 }
 
 static void _drawEnd(void) {
@@ -395,6 +420,11 @@ static void _drawEnd(void) {
 	GX_CopyDisp(framebuffer[whichFb], GX_TRUE);
 	VIDEO_SetNextFramebuffer(framebuffer[whichFb]);
 	VIDEO_Flush();
+
+	u32 level = 0;
+	_CPU_ISR_Disable(level);
+	++referenceRetraceCount;
+	_CPU_ISR_Restore(level);
 }
 
 static uint16_t _pollGameInput(void){
@@ -655,8 +685,8 @@ static u32 _getWiiButton(char btnName[5]){
 void _stopGX(void){
 
 	VIDEO_SetBlack(TRUE);
-	VIDEO_ClearFrameBuffer(mode, framebuffer[0], COLOR_BLACK);
-	VIDEO_ClearFrameBuffer(mode, framebuffer[1], COLOR_BLACK);
+	//VIDEO_ClearFrameBuffer(vmode, framebuffer[0], COLOR_BLACK);
+	//VIDEO_ClearFrameBuffer(vmode, framebuffer[1], COLOR_BLACK);
 	VIDEO_Flush();
 	//VIDEO_WaitVSync();
 	GX_AbortFrame();
@@ -739,4 +769,11 @@ static s8 WPAD_StickY(u8 chan, u8 right)
 	double val = mag * cos(M_PI * ang/180.0f);
  
 	return (s8)(val * 128.0f);
+}
+
+void _retraceCallback(u32 count) {
+	u32 level = 0;
+	_CPU_ISR_Disable(level);
+	retraceCount = count;
+	_CPU_ISR_Restore(level);
 }

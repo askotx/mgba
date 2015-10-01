@@ -38,11 +38,11 @@ INCLUDES	:=  src src/arm
 #---------------------------------------------------------------------------------
 CFLAGS = -g -O3 -mrvl $(MACHDEP) $(INCLUDE) $(DEFS) -Wall -Wextra -std=c99 \
         -DCOLOR_16_BIT -DCOLOR_5_6_5 -DUSE_VFS_FILE -DRESAMPLE_LIBRARY=RESAMPLE_BLIP_BUF \
-        -DDISABLE_THREADING -DBINARY_NAME=mgba
+        -DDISABLE_THREADING -DBINARY_NAME=mgba -U__STRICT_ANSI__
 
 CXXFLAGS	=	$(CFLAGS)
 
-LDFLAGS = -g $(MACHDEP) -mrvl -Wl,-Map,$(notdir $@).map -s
+LDFLAGS = -g $(MACHDEP) -mrvl -Wl,-Map,$(notdir $@).map -s -Wno-format
 
 #---------------------------------------------------------------------------------
 # any extra libraries we wish to link with the project

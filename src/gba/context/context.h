@@ -7,6 +7,7 @@
 #define CONTEXT_H
 
 #include "util/common.h"
+#include "util/patch.h"
 
 #include "gba/context/config.h"
 #include "gba/input.h"
@@ -14,11 +15,13 @@
 struct GBAContext {
 	struct GBA* gba;
 	struct ARMCore* cpu;
+	//struct Patch patch;
 	struct GBAVideoRenderer* renderer;
 	struct VFile* rom;
 	const char* fname;
 	struct VFile* save;
 	struct VFile* bios;
+	//struct VFile* fpatch;
 	struct ARMComponent* components[GBA_COMPONENT_MAX];
 	struct GBAConfig config;
 	struct GBAOptions opts;
@@ -29,6 +32,7 @@ bool GBAContextInit(struct GBAContext* context, const char* port);
 void GBAContextDeinit(struct GBAContext* context);
 
 bool GBAContextLoadROM(struct GBAContext* context, const char* path, bool autoloadSave);
+bool GBAContextLoadROMAndSaveDir(struct GBAContext* context, const char* path, const char* savePath, const char* saveName, bool autoloadSave);
 bool GBAContextLoadROMFromVFile(struct GBAContext* context, struct VFile* rom, struct VFile* save);
 bool GBAContextLoadBIOS(struct GBAContext* context, const char* path);
 bool GBAContextLoadBIOSFromVFile(struct GBAContext* context, struct VFile* bios);

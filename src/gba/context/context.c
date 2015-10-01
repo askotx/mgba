@@ -8,6 +8,7 @@
 #include "gba/context/overrides.h"
 
 #include "util/memory.h"
+
 #include "util/vfs.h"
 
 static struct VFile* _logFile = 0;
@@ -19,6 +20,7 @@ bool GBAContextInit(struct GBAContext* context, const char* port) {
 	context->rom = 0;
 	context->bios = 0;
 	context->fname = 0;
+	//context->fpatch = 0;
 	context->save = 0;
 	context->renderer = 0;
 	memset(context->components, 0, sizeof(context->components));
@@ -92,6 +94,28 @@ bool GBAContextLoadROM(struct GBAContext* context, const char* path, bool autolo
 	return true;
 }
 
+bool GBAContextLoadROMAndSaveDir(struct GBAContext* context, const char* path, const char* savePath, const char* saveName, bool autoloadSave) {
+	context->rom = VFileOpen(path, O_RDONLY);
+	if (!context->rom) {
+		return false;
+	}
+
+	if (!GBAIsROM(context->rom)) {
+		context->rom->close(context->rom);
+		context->rom = 0;
+		return false;
+	}
+
+	//context->fpatch = VDirOptionalOpenFile(0, path, 0, ".ips", O_RDONLY);
+
+	context->fname = path;
+	if (autoloadSave) {
+		struct VDir* dir= VDirOpen(savePath);
+		context->save = dir->openFile(dir, saveName, O_RDWR | O_CREAT);
+	}
+	return true;
+}
+
 void GBAContextUnloadROM(struct GBAContext* context) {
 	GBAUnloadROM(context->gba);
 	if (context->bios) {
@@ -102,6 +126,10 @@ void GBAContextUnloadROM(struct GBAContext* context) {
 		context->rom->close(context->rom);
 		context->rom = 0;
 	}
+	//if (context->fpatch) {
+	//	context->fpatch->close(context->fpatch);
+	//	context->fpatch = 0;
+	//}
 	if (context->save) {
 		context->save->close(context->save);
 		context->save = 0;
@@ -175,6 +203,9 @@ bool GBAContextStart(struct GBAContext* context) {
 	if (GBAOverrideFind(GBAConfigGetOverrides(&context->config), &override)) {
 		GBAOverrideApply(context->gba, &override);
 	}
+	//if (context->fpatch && loadPatch(context->fpatch, &context->patch)) {
+	//	GBAApplyPatch(context->gba, &context->patch);
+	//}
 	GBAConfigFreeOpts(&opts);
 	return true;
 }

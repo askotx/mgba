@@ -11,6 +11,8 @@
 
 #include "wii-settings.h"
 
+void _stripExt(char* returnstring, const char * inputstring) ;
+
 void _wiiParseArgs(int argc, char *argv[]){
 	for (int i = 1; i < argc; i++){
 		if (strcasecmp (argv [i], "-rom") == 0 && (i + 1 < argc)){
@@ -40,8 +42,11 @@ void _wiiParseArgs(int argc, char *argv[]){
 		if (strcasecmp (argv [i], "-button_R") == 0 && (i + 1 < argc)){
 			snprintf(wiiSettings.buttonR, 5, "%s",argv [i+1]);
 		}
-		if (strcasecmp (argv [i], "-volume") == 0 && (i + 1 < argc)){
-			wiiSettings.volume = atoi (argv [++i]);
+		if (strcasecmp (argv [i], "-savePath") == 0 && (i + 1 < argc) && (i + 2 < argc)){
+			snprintf(wiiSettings.savePath, 256, "%s",argv [i+1]);
+			char tmp[256];
+			_stripExt(tmp, argv [i+2]);
+			snprintf(wiiSettings.saveName, 256, "%s.sav", tmp);
 		}
 
 	}
@@ -58,9 +63,6 @@ void _fixInvalidSettings(){
 	if(wiiSettings.reduceScale < 50 || wiiSettings.reduceScale > 100){
 		wiiSettings.reduceScale = 100;
 	}
-	if (wiiSettings.volume < 1 || wiiSettings.volume > GBA_AUDIO_VOLUME_MAX){
-		wiiSettings.volume = GBA_AUDIO_VOLUME_MAX;
-	}
 	if(strcasecmp (wiiSettings.buttonA, "") == 0 || wiiSettings.buttonA == NULL){
 		snprintf(wiiSettings.buttonA, 5, "%s","A");
 	}
@@ -73,4 +75,17 @@ void _fixInvalidSettings(){
 	if(strcasecmp (wiiSettings.buttonR, "") == 0 || wiiSettings.buttonR == NULL){
 		snprintf(wiiSettings.buttonR, 5, "%s","R");
 	}
+}
+
+void _stripExt(char* returnstring, const char * inputstring) {
+	char* loc_dot;
+
+	snprintf(returnstring, 256, "%s", inputstring);
+
+	if(inputstring == NULL || strlen(inputstring) < 4)
+		return;
+
+	loc_dot = strrchr(returnstring,'.');
+	if (loc_dot != NULL)
+		*loc_dot = 0; // strip file extension
 }

@@ -8,6 +8,8 @@
 
 struct WiiSettings{
 	char fullRomPath[256];
+	char savePath[256];
+	char saveName[64];
 	int render;
 	int video_mode;
 	int reduceScale;
@@ -16,7 +18,6 @@ struct WiiSettings{
 	char buttonB[5];
 	char buttonL[5];
 	char buttonR[5];
-	int volume;
 };
 
 extern struct WiiSettings wiiSettings;
