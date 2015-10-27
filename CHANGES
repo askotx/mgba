@@ -1,4 +1,8 @@
 0.4.0: (Future)
+Features:
+ - Officially supported ports for the Nintendo 3DS, Wii, and PlayStation Vita
+ - I/O viewer
+ - Booting of multiboot images
 Bugfixes:
  - Qt: Windows no longer spawn in the top left on first launch
  - Qt: Fix install path of XDG desktop file with DESTDIR
@@ -18,6 +22,7 @@ Bugfixes:
  - GBA: Fix autodetect problems with some bad dumps of Super Mario Advance 2
  - GBA Memory: Fix bad BIOS Load16 on big endian
  - GBA Memory: Fix bad Load8 on big endian
+ - ARM7: Fix instruction decoding of Thumb shifts
 Misc:
  - Qt: Window size command line options are now supported
  - Qt: Increase usability of key mapper
@@ -38,7 +43,11 @@ Misc:
  - All: Reset next event to cycles instead of zero to interrupt
  - GBA Video: Remove lastHblank, as it is implied
  - GBA: Check for cycle count being too high
- - GBA Config: Add "override" layer for better one-time configuration`
+ - GBA Config: Add "override" layer for better one-time configuration
+ - SDL: Allow GBASDLAudio to be used without a thread context
+ - All: Improved PowerPC support
+ - All: Add --version flag
+ - All: Fix some undefined behavior warnings
 
 0.3.0: (2015-08-16)
 Features:
