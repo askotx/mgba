@@ -172,7 +172,7 @@ void retro_init(void) {
 	GBAContextInit(&context, 0);
 	struct GBAOptions opts = {
 		.useBios = true,
-		.idleOptimization = IDLE_LOOP_REMOVE
+		.idleOptimization = IDLE_LOOP_DETECT
 	};
 	GBAConfigLoadDefaults(&context.config, &opts);
 	context.gba->logHandler = GBARetroLog;
