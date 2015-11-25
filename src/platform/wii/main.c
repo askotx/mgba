@@ -214,7 +214,7 @@ int main(int argc, char *argv[]) {
 	rotation.readGyroZ = _readGyroZ;
 
 	GBAContextInit(&context, "wii");
-	char biosPath[64];
+	/*char biosPath[64];
 	snprintf(biosPath, 64, "/mgba/gba_bios.bin");
 	struct GBAOptions opts = {
 		.bios = biosPath,
@@ -223,7 +223,7 @@ int main(int argc, char *argv[]) {
 		.idleOptimization = IDLE_LOOP_DETECT
 	};
 	GBAConfigLoad(&context.config);
-	GBAConfigLoadDefaults(&context.config, &opts);
+	GBAConfigLoadDefaults(&context.config, &opts);*/
 	context.gba->stream = &stream;
 	context.gba->rumble = &rumble;
 	context.gba->rotationSource = &rotation;

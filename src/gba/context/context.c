@@ -20,7 +20,6 @@ bool GBAContextInit(struct GBAContext* context, const char* port) {
 	context->rom = 0;
 	context->bios = 0;
 	context->fname = 0;
-	//context->fpatch = 0;
 	context->save = 0;
 	context->renderer = 0;
 	memset(context->components, 0, sizeof(context->components));
@@ -59,8 +58,8 @@ bool GBAContextInit(struct GBAContext* context, const char* port) {
 			.idleOptimization = IDLE_LOOP_DETECT,
 			.logLevel = GBA_LOG_WARN | GBA_LOG_ERROR | GBA_LOG_FATAL | GBA_LOG_STATUS
 		};
-		GBAConfigLoadDefaults(&context->config, &opts);
 		GBAConfigLoad(&context->config);
+		GBAConfigLoadDefaults(&context->config, &opts);
 	}
 
 	context->gba->sync = 0;
